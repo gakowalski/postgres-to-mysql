@@ -1,10 +1,23 @@
 <?php
 
+$create_table = false;
+$insert_into = true;
+$line_limit = null; 
+
 $verbose_comments = false;
 $verbose_set = false;
 $verbose_ignored = false;
 $verbose_column_definitions = false;
 $explicit_column_list = false;
+
+$storage_engines = [
+    'InnoDB',
+    'MyISAM',
+    'MEMORY',
+    'CSV',
+];
+
+$default_table_engine = 'MEMORY';
 
 // if no input file path is provided then exit
 if (!isset($argv[1])) {
@@ -18,6 +31,7 @@ $ingore_lines_starting_with = array(
     "COMMENT",
     "CREATE TRIGGER",
     "CREATE INDEX",
+    "CREATE UNIQUE INDEX",
     "CREATE SEQUENCE",
     "GRANT",
 );
@@ -48,22 +62,33 @@ $target_table = null;
 $first_line = true;
 $columns_list = [];
 
-$line_limit = null; 
 $line_count = 0;
+
+?>
+SET NAMES utf8;
+SET CHARACTER SET utf8;
+<?php
 
 // start loop
 while (($line = fgets($handle)) !== false) {
-    if ($line_limit && $line_count++ > $limit) {
-        echo "LIMIT REACHED\n";
+    if ($line_limit && $line_count++ > $line_limit) {
+        echo "-- LIMIT REACHED\n";
         break;
     }
 
     if ($state == 'CREATE TABLE' && $terminator) {
         if (str_starts_with($line, $terminator)) {
-            echo "\n$terminator\n";
-            echo "-- END OF TABLE DEFINITION\n\n";
+            //echo "\n$terminator\n";
+            if ($create_table) {
+                echo ") ENGINE=$default_table_engine DEFAULT CHARACTER SET = utf8;\n";
+                echo "-- END OF TABLE DEFINITION\n\n";
+            }
             $state = null;
             $terminator = null;
+            continue;
+        }
+
+        if (!$create_table) {
             continue;
         }
 
@@ -108,6 +133,10 @@ while (($line = fgets($handle)) !== false) {
         if (str_starts_with($line, $terminator)) {
             $state = null;
             $terminator = null;
+            continue;
+        }
+
+        if (!$insert_into) {
             continue;
         }
         
@@ -195,7 +224,9 @@ while (($line = fgets($handle)) !== false) {
         $parts = explode(".", $target_table);
         $target_table = $parts[count($parts) - 1];
 
-        echo "CREATE TABLE $target_table (\n";
+        if ($create_table) {
+            echo "CREATE TABLE $target_table (\n";
+        }
         continue;
     }
 
