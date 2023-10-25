@@ -1,16 +1,20 @@
 <?php
 
-$create_table = false;
-$insert_into = true;
-$line_limit = null; 
+$create_table = false; // false to skip create table statements
+$insert_into = true; // false to skip insert statements
+
+$line_limit = null; // null for no limit
+$merge_inserts = true; // true to merge two inserts into one statement (to speedup import)
 
 $verbose_comments = false;
 $verbose_set = false;
 $verbose_ignored = false;
 $verbose_column_definitions = false;
+$verbose_insert_into_keyword = false; // false to skip INTO keyword
+$verbose_insert_values_keyword = false; // false to save 1 byte per insert statement
 $explicit_column_list = false;
 
-$storage_engines = [
+$storage_engines = [    // storage engines to use for CREATE TABLE statements, actually unused in the code for time being
     'InnoDB',
     'MyISAM',
     'MEMORY',
@@ -61,8 +65,21 @@ $terminator = null;
 $target_table = null;
 $first_line = true;
 $columns_list = [];
+$sql = '';
 
 $line_count = 0;
+
+if ($verbose_insert_into_keyword) {
+    $into = 'INTO ';
+} else {
+    $into = '';
+}
+
+if ($verbose_insert_values_keyword) {
+    $values = 'VALUES ';
+} else {
+    $values = 'VALUE ';
+}
 
 ?>
 SET NAMES utf8;
@@ -131,6 +148,11 @@ while (($line = fgets($handle)) !== false) {
 
     if ($state == 'COPY' && $terminator) {
         if (str_starts_with($line, $terminator)) {
+
+            if ($first_line === false) {
+                echo ");\n";
+            } 
+
             $state = null;
             $terminator = null;
             continue;
@@ -145,10 +167,14 @@ while (($line = fgets($handle)) !== false) {
 
         // convert to MySQL insert statement
 
-        if ($explicit_column_list) {
-            $sql = "INSERT INTO $target_table $columns_list VALUES (";
+        if ($first_line) {
+            if ($explicit_column_list) {
+                $sql = "INSERT $into$target_table $columns_list $values(";
+            } else {
+                $sql = "INSERT $into$target_table $values(";
+            }
         } else {
-            $sql = "INSERT INTO $target_table VALUES (";
+            $sql = '';
         }
 
         for ($i = 0; $i < count($parts); $i++) {
@@ -167,10 +193,22 @@ while (($line = fgets($handle)) !== false) {
                 ]);
                 $cell = "'$cell'";
             }
-            $sql .= "$cell, ";
+            if ($i > 0) {
+                $sql .= ',';
+            }
+            $sql .= $cell;
         }
-        $sql = rtrim($sql, ", ");
-        $sql .= ");\n";
+
+        if ($merge_inserts === false) {
+            $first_line = false;
+        }
+
+        if ($first_line) {
+            $sql .= "),(";
+        } else {
+            $sql .= ");\n";
+        }
+        $first_line = !$first_line;
         echo $sql;
         continue;
     }
@@ -233,8 +271,7 @@ while (($line = fgets($handle)) !== false) {
     if (str_starts_with($line, 'COPY')) {
         $state = "COPY";
         $terminator = '\.';
-        //$first_line = true;
-        
+        $first_line = true;
 
         // extract target table name
         $parts = explode(" ", $line);
