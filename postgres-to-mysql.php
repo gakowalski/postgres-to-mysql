@@ -1,10 +1,12 @@
 <?php
 
-$create_table = false; // false to skip create table statements
+$create_table = true; // false to skip create table statements
 $insert_into = true; // false to skip insert statements
 
 $line_limit = null; // null for no limit
 $merge_inserts = true; // true to merge two inserts into one statement (to speedup import)
+
+$limit_insert_columns = false; // trim number of columns in insert statement (to speedup import)
 
 $verbose_comments = false;
 $verbose_set = false;
@@ -29,7 +31,7 @@ if (!isset($argv[1])) {
     exit;
 }
 
-$ingore_lines_starting_with = array(
+$ignore_lines_starting_with = array(
     "SELECT",
     "ALTER",
     "COMMENT",
@@ -41,10 +43,13 @@ $ingore_lines_starting_with = array(
 );
 
 // create regex pattern to match lines starting with above strings
-$ingore_lines_starting_with_regex = "/^(" . implode("|", $ingore_lines_starting_with) . ")/";
+$ignore_lines_starting_with_regex = "/^(" . implode("|", $ignore_lines_starting_with) . ")/";
 
 // read input file path from command line
 $input_file = $argv[1];
+
+$command_string = implode(" ", $argv);
+echo "-- GENERATED WITH: $command_string\n\n";
 
 // read input file line by line
 // files will be very large so we can't read whole file in memory
@@ -54,7 +59,7 @@ $handle = fopen($input_file, "r");
 //$output_file = fopen("output.sql", "w");
 
 // read file line by line till end of file
-// ingore blank lines
+// ignore blank lines
 // echo lines starting with -- as comments
 // parse lines starting with SET as key = value and save to array $set
 // ignore lines starting with ALTER and COMMENT
@@ -150,12 +155,17 @@ while (($line = fgets($handle)) !== false) {
         if (str_starts_with($line, $terminator)) {
 
             if ($first_line === false) {
-                echo ");\n";
-            } 
+                // remove "),(" from end of sql
+                $sql = substr($sql, 0, -3);
+                $sql .= ");\n";
+            }
+            echo $sql;
 
             $state = null;
             $terminator = null;
             continue;
+        } else {
+            echo $sql;
         }
 
         if (!$insert_into) {
@@ -177,7 +187,7 @@ while (($line = fgets($handle)) !== false) {
             $sql = '';
         }
 
-        for ($i = 0; $i < count($parts); $i++) {
+        for ($i = 0; $i < ($limit_insert_columns ? min($limit_insert_columns, count($parts)) : count($parts)); $i++) {
             $cell = $parts[$i];
             if ($cell == "\\N") {
                 $cell = "NULL";
@@ -209,7 +219,7 @@ while (($line = fgets($handle)) !== false) {
             $sql .= ");\n";
         }
         $first_line = !$first_line;
-        echo $sql;
+        //echo $sql;
         continue;
     }
 
@@ -241,7 +251,7 @@ while (($line = fgets($handle)) !== false) {
     // ignore lines starting with ALTER and COMMENT
     if (
         str_starts_with($line, " ") 
-        || preg_match($ingore_lines_starting_with_regex, $line)
+        || preg_match($ignore_lines_starting_with_regex, $line)
         ) {
         if ($verbose_ignored) {
             echo "IGNORED: $line";
@@ -272,6 +282,7 @@ while (($line = fgets($handle)) !== false) {
         $state = "COPY";
         $terminator = '\.';
         $first_line = true;
+        $sql = '';
 
         // extract target table name
         $parts = explode(" ", $line);
